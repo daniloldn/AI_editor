@@ -284,18 +284,21 @@ export default async function FullEssayPage({
                           originalPieces.map((piece, index) => (
                             <span
                               key={`o-${paragraph.id}-${index}`}
-                              title={
-                                piece.status === "removed" && explanation
-                                  ? explanation
-                                  : undefined
-                              }
                               className={
                                 piece.status === "removed"
-                                  ? "rounded bg-red-100 text-red-800 line-through"
+                                  ? "group relative rounded bg-red-100 text-red-800 line-through cursor-help"
                                   : ""
+                              }
+                              tabIndex={
+                                piece.status === "removed" && explanation ? 0 : undefined
                               }
                             >
                               {(index > 0 ? " " : "") + piece.text}
+                              {piece.status === "removed" && explanation && (
+                                <span className="pointer-events-none absolute left-0 top-full z-10 mt-2 hidden w-72 rounded-md border border-accent bg-white p-2 text-xs font-normal leading-5 text-zinc-700 shadow-md group-hover:block group-focus-visible:block">
+                                  {explanation}
+                                </span>
+                              )}
                             </span>
                           ))
                         ) : (
@@ -312,18 +315,21 @@ export default async function FullEssayPage({
                           polishedPieces.map((piece, index) => (
                             <span
                               key={`p-${paragraph.id}-${index}`}
-                              title={
-                                piece.status === "added" && explanation
-                                  ? explanation
-                                  : undefined
-                              }
                               className={
                                 piece.status === "added"
-                                  ? "rounded bg-green-100 text-green-800"
+                                  ? "group relative rounded bg-green-100 text-green-800 cursor-help"
                                   : ""
+                              }
+                              tabIndex={
+                                piece.status === "added" && explanation ? 0 : undefined
                               }
                             >
                               {(index > 0 ? " " : "") + piece.text}
+                              {piece.status === "added" && explanation && (
+                                <span className="pointer-events-none absolute left-0 top-full z-10 mt-2 hidden w-72 rounded-md border border-accent bg-white p-2 text-xs font-normal leading-5 text-zinc-700 shadow-md group-hover:block group-focus-visible:block">
+                                  {explanation}
+                                </span>
+                              )}
                             </span>
                           ))
                         ) : (
