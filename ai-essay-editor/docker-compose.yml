@@ -1,0 +1,15 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "file:/app/data/dev.db"
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+    volumes:
+      - essay_editor_data:/app/data
+
+volumes:
+  essay_editor_data:

@@ -1,36 +1,152 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Essay Editor
 
-## Getting Started
+Next.js + TypeScript + Tailwind + Prisma (SQLite) app for drafting and polishing essays paragraph by paragraph.
 
-First, run the development server:
+## Requirements
+
+- Node.js 20+
+- npm 10+
+
+## Local Setup
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Copy env file:
+
+```bash
+cp .env.example .env
+```
+
+On Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+3. Add your OpenAI key in `.env`:
+
+```env
+OPENAI_API_KEY=your_key_here
+```
+
+4. Run migrations (creates/updates `prisma/dev.db`):
+
+```bash
+npm run prisma:migrate:dev
+```
+
+5. Start dev server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+App runs at `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment Variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `DATABASE_URL`: Prisma DB connection (default local dev: `file:./dev.db`)
+- `OPENAI_API_KEY`: required for paragraph polishing
 
-## Learn More
+## Docker (Local Distribution)
 
-To learn more about Next.js, take a look at the following resources:
+This repo includes `Dockerfile` + `docker-compose.yml` for local usage by different users.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Each user gets their own local persistent SQLite database through a Docker volume.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Copy env file:
 
-## Deploy on Vercel
+```bash
+cp .env.example .env
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+On Windows PowerShell:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```powershell
+Copy-Item .env.example .env
+```
+
+2. Set your OpenAI key in `.env`:
+
+```env
+OPENAI_API_KEY=your_key_here
+```
+
+3. Build and start:
+
+```bash
+docker compose up --build
+```
+
+4. Open:
+
+`http://localhost:3000`
+
+5. Stop:
+
+```bash
+docker compose down
+```
+
+Your essay data is still kept after `down` because it is stored in the named Docker volume `essay_editor_data`.
+
+If you want to remove app data completely:
+
+```bash
+docker compose down -v
+```
+
+### Where SQLite Lives in Docker
+
+- Inside container: `/app/data/dev.db`
+- Persisted by volume: `essay_editor_data` mounted at `/app/data`
+
+So container recreation does not delete essay data unless you remove volumes.
+
+## Useful Scripts
+
+- `npm run dev`: start development server
+- `npm run build`: production build
+- `npm run start`: run production server after build
+- `npm run lint`: run ESLint
+- `npm run typecheck`: run TypeScript checks
+- `npm run check`: lint + typecheck + build
+- `npm run prisma:generate`: generate Prisma client
+- `npm run prisma:migrate:dev`: create/apply local migration
+- `npm run prisma:migrate:deploy`: apply existing migrations (deployment)
+- `npm run prisma:studio`: open Prisma Studio
+
+## Prisma Workflow
+
+- When schema changes locally:
+  1. Update `prisma/schema.prisma`
+  2. Run `npm run prisma:migrate:dev -- --name your_migration_name`
+  3. Commit both schema and new migration files
+
+- In deployment environments:
+  - Run `npm run prisma:migrate:deploy`
+  - Do not use `migrate dev` in production
+
+## Pre-Deployment Checklist
+
+Run this before deployment:
+
+```bash
+npm ci
+npm run check
+npm run prisma:migrate:deploy
+```
+
+Then start with:
+
+```bash
+npm run start
+```
+
+## Deployment Note (SQLite)
+
+This app currently uses SQLite. For production, the filesystem path for `DATABASE_URL` must be writable and persistent. If your platform uses ephemeral or read-only filesystems, use a persistent volume or move to a managed database.
