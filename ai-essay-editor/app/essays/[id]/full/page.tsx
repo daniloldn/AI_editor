@@ -17,8 +17,120 @@ type DiffPiece = {
   status: "common" | "removed" | "added";
 };
 
+type ParsedExplanationEdit = {
+  from: string;
+  to: string;
+  sourceLine: string;
+};
+
 function splitWords(text: string) {
   return text.trim().split(/\s+/).filter((word) => word.length > 0);
+}
+
+function compressDiffPieces(pieces: DiffPiece[]) {
+  if (pieces.length === 0) {
+    return [];
+  }
+
+  const merged: DiffPiece[] = [pieces[0]];
+
+  for (let i = 1; i < pieces.length; i += 1) {
+    const current = pieces[i];
+    const previous = merged[merged.length - 1];
+
+    if (previous.status === current.status) {
+      previous.text = `${previous.text} ${current.text}`;
+      continue;
+    }
+
+    merged.push({ ...current });
+  }
+
+  return merged;
+}
+
+function normalizeForMatch(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[“”"‘’']/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isClearPhraseMatch(changedText: string, phrase: string) {
+  const changed = normalizeForMatch(changedText);
+  const target = normalizeForMatch(phrase);
+
+  if (!changed || !target) {
+    return false;
+  }
+
+  if (changed === target) {
+    return true;
+  }
+
+  // Keep matching conservative to avoid incorrect mappings.
+  return changed.includes(target) || target.includes(changed);
+}
+
+function parseEditLevelExplanations(explanation: string) {
+  const lines = explanation
+    .split("\n")
+    .map((line) => line.replace(/^\s*[-*]\s*/, "").trim())
+    .filter((line) => line.length > 0);
+
+  const edits: ParsedExplanationEdit[] = [];
+  const quoted = `[“”"‘’']([^“”"‘’']+)[“”"‘’']`;
+
+  for (const line of lines) {
+    let match = line.match(
+      new RegExp(`changed\\s+${quoted}\\s+to\\s+${quoted}`, "i"),
+    );
+    if (match) {
+      edits.push({ from: match[1], to: match[2], sourceLine: line });
+      continue;
+    }
+
+    match = line.match(
+      new RegExp(`replaced\\s+${quoted}\\s+with\\s+${quoted}`, "i"),
+    );
+    if (match) {
+      edits.push({ from: match[1], to: match[2], sourceLine: line });
+      continue;
+    }
+
+    match = line.match(
+      new RegExp(`${quoted}\\s+instead of\\s+${quoted}`, "i"),
+    );
+    if (match) {
+      edits.push({ from: match[2], to: match[1], sourceLine: line });
+    }
+  }
+
+  return edits;
+}
+
+function getTooltipForDiffPiece(
+  piece: DiffPiece,
+  paragraphExplanation: string,
+  parsedEdits: ParsedExplanationEdit[],
+) {
+  if (!paragraphExplanation || piece.status === "common") {
+    return "";
+  }
+
+  const matchingEdits = parsedEdits.filter((edit) =>
+    piece.status === "added"
+      ? isClearPhraseMatch(piece.text, edit.to)
+      : isClearPhraseMatch(piece.text, edit.from),
+  );
+
+  if (matchingEdits.length === 1) {
+    return matchingEdits[0].sourceLine;
+  }
+
+  return paragraphExplanation;
 }
 
 function buildDiffPieces(original: string, polished: string) {
@@ -69,11 +181,15 @@ function buildDiffPieces(original: string, polished: string) {
   operations.reverse();
 
   return {
-    originalPieces: operations.filter(
-      (piece) => piece.status === "common" || piece.status === "removed",
+    originalPieces: compressDiffPieces(
+      operations.filter(
+        (piece) => piece.status === "common" || piece.status === "removed",
+      ),
     ),
-    polishedPieces: operations.filter(
-      (piece) => piece.status === "common" || piece.status === "added",
+    polishedPieces: compressDiffPieces(
+      operations.filter(
+        (piece) => piece.status === "common" || piece.status === "added",
+      ),
     ),
   };
 }
@@ -260,6 +376,7 @@ export default async function FullEssayPage({
               const parsed = parsePolishResult(paragraph.polishedText);
               const polished = parsed.polishedParagraph;
               const explanation = parsed.explanation.trim();
+              const parsedEdits = parseEditLevelExplanations(explanation);
               const original = paragraph.originalText.trim();
               const { originalPieces, polishedPieces } = buildDiffPieces(
                 original,
@@ -282,24 +399,36 @@ export default async function FullEssayPage({
                       <p className="text-sm leading-7 text-zinc-800">
                         {originalPieces.length > 0 ? (
                           originalPieces.map((piece, index) => (
-                            <span
-                              key={`o-${paragraph.id}-${index}`}
-                              className={
-                                piece.status === "removed"
-                                  ? "group relative rounded bg-red-100 text-red-800 line-through cursor-help"
-                                  : ""
-                              }
-                              tabIndex={
-                                piece.status === "removed" && explanation ? 0 : undefined
-                              }
-                            >
-                              {(index > 0 ? " " : "") + piece.text}
-                              {piece.status === "removed" && explanation && (
-                                <span className="pointer-events-none absolute left-0 top-full z-10 mt-2 hidden w-72 rounded-md border border-accent bg-white p-2 text-xs font-normal leading-5 text-zinc-700 shadow-md group-hover:block group-focus-visible:block">
-                                  {explanation}
+                            (() => {
+                              const tooltip = getTooltipForDiffPiece(
+                                piece,
+                                explanation,
+                                parsedEdits,
+                              );
+
+                              return (
+                                <span
+                                  key={`o-${paragraph.id}-${index}`}
+                                  className={
+                                    piece.status === "removed"
+                                      ? "group relative rounded bg-red-100 text-red-800 line-through cursor-help"
+                                      : ""
+                                  }
+                                  tabIndex={
+                                    piece.status === "removed" && tooltip
+                                      ? 0
+                                      : undefined
+                                  }
+                                >
+                                  {(index > 0 ? " " : "") + piece.text}
+                                  {piece.status === "removed" && tooltip && (
+                                    <span className="pointer-events-none absolute left-0 top-full z-10 mt-2 hidden w-72 rounded-md border border-accent bg-white p-2 text-xs font-normal leading-5 text-zinc-700 shadow-md group-hover:block group-focus-visible:block">
+                                      {tooltip}
+                                    </span>
+                                  )}
                                 </span>
-                              )}
-                            </span>
+                              );
+                            })()
                           ))
                         ) : (
                           <span className="text-zinc-400">(empty)</span>
@@ -313,24 +442,36 @@ export default async function FullEssayPage({
                       <p className="text-sm leading-7 text-zinc-800">
                         {polishedPieces.length > 0 ? (
                           polishedPieces.map((piece, index) => (
-                            <span
-                              key={`p-${paragraph.id}-${index}`}
-                              className={
-                                piece.status === "added"
-                                  ? "group relative rounded bg-green-100 text-green-800 cursor-help"
-                                  : ""
-                              }
-                              tabIndex={
-                                piece.status === "added" && explanation ? 0 : undefined
-                              }
-                            >
-                              {(index > 0 ? " " : "") + piece.text}
-                              {piece.status === "added" && explanation && (
-                                <span className="pointer-events-none absolute left-0 top-full z-10 mt-2 hidden w-72 rounded-md border border-accent bg-white p-2 text-xs font-normal leading-5 text-zinc-700 shadow-md group-hover:block group-focus-visible:block">
-                                  {explanation}
+                            (() => {
+                              const tooltip = getTooltipForDiffPiece(
+                                piece,
+                                explanation,
+                                parsedEdits,
+                              );
+
+                              return (
+                                <span
+                                  key={`p-${paragraph.id}-${index}`}
+                                  className={
+                                    piece.status === "added"
+                                      ? "group relative rounded bg-green-100 text-green-800 cursor-help"
+                                      : ""
+                                  }
+                                  tabIndex={
+                                    piece.status === "added" && tooltip
+                                      ? 0
+                                      : undefined
+                                  }
+                                >
+                                  {(index > 0 ? " " : "") + piece.text}
+                                  {piece.status === "added" && tooltip && (
+                                    <span className="pointer-events-none absolute left-0 top-full z-10 mt-2 hidden w-72 rounded-md border border-accent bg-white p-2 text-xs font-normal leading-5 text-zinc-700 shadow-md group-hover:block group-focus-visible:block">
+                                      {tooltip}
+                                    </span>
+                                  )}
                                 </span>
-                              )}
-                            </span>
+                              );
+                            })()
                           ))
                         ) : (
                           <span className="text-zinc-400">(empty)</span>
