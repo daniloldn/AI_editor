@@ -2,6 +2,11 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import CopyParagraphButton from "./copy-paragraph-button";
 import {
+  DEFAULT_MODULE_COLOR,
+  getModuleTextColor,
+  sanitizeModuleColor,
+} from "@/lib/module-badge";
+import {
   OpenAIKeyMissingError,
   polishParagraphWithOpenAI,
   PromptInterpolationError,
@@ -10,7 +15,7 @@ import { prisma } from "@/lib/prisma";
 
 type EssayDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; context?: string }>;
+  searchParams: Promise<{ error?: string; context?: string; details?: string }>;
 };
 
 function parsePolishResult(storedText: string) {
@@ -66,7 +71,8 @@ async function createParagraph(formData: FormData) {
   const essayForPrompt = await prisma.essay.findUnique({
     where: { id: essayId },
     select: {
-      title: true,
+      name: true,
+      question: true,
       contextNotes: true,
       paragraphs: {
         orderBy: { order: "asc" },
@@ -77,6 +83,10 @@ async function createParagraph(formData: FormData) {
 
   if (!essayForPrompt) {
     redirect("/");
+  }
+
+  if (!essayForPrompt.question.trim()) {
+    redirect(`/essays/${essayId}?error=missing-question`);
   }
 
   const previousParagraphsContext = essayForPrompt.paragraphs
@@ -93,7 +103,7 @@ async function createParagraph(formData: FormData) {
 
   try {
     polishedText = await polishParagraphWithOpenAI({
-      question: essayForPrompt.title,
+      question: essayForPrompt.question,
       polish_paragraph: originalText,
       context,
     });
@@ -141,16 +151,52 @@ async function saveEssayContext(formData: FormData) {
   redirect(`/essays/${essayId}?context=saved`);
 }
 
+async function saveEssayDetails(formData: FormData) {
+  "use server";
+
+  const essayIdValue = formData.get("essayId");
+  const nameValue = formData.get("name");
+  const questionValue = formData.get("question");
+  const moduleNameValue = formData.get("moduleName");
+  const moduleColorValue = formData.get("moduleColor");
+  const essayId = Number(essayIdValue);
+  const name = typeof nameValue === "string" ? nameValue.trim() : "";
+  const question = typeof questionValue === "string" ? questionValue.trim() : "";
+  const moduleName =
+    typeof moduleNameValue === "string" ? moduleNameValue.trim() : "";
+  const moduleColor =
+    typeof moduleColorValue === "string"
+      ? sanitizeModuleColor(moduleColorValue)
+      : DEFAULT_MODULE_COLOR;
+
+  if (!Number.isInteger(essayId) || essayId <= 0) {
+    redirect("/");
+  }
+
+  if (!name || !question || !moduleName) {
+    redirect(`/essays/${essayId}?details=missing-fields`);
+  }
+
+  await prisma.essay.update({
+    where: { id: essayId },
+    data: { name, question, moduleName, moduleColor },
+  });
+
+  redirect(`/essays/${essayId}?details=saved`);
+}
+
 export default async function EssayDetailPage({
   params,
   searchParams,
 }: EssayDetailPageProps) {
   const { id } = await params;
-  const { error, context } = await searchParams;
+  const { error, context, details } = await searchParams;
   const essayId = Number(id);
   const errorMessage =
     error === "missing-paragraph"
       ? "Please enter a paragraph."
+      : error === "missing-question"
+        ? "Essay question is required before polishing."
       : error === "missing-openai-key"
         ? "OpenAI API key is missing. Add OPENAI_API_KEY to your .env file."
         : error === "invalid-prompt-variables"
@@ -160,6 +206,12 @@ export default async function EssayDetailPage({
           : null;
   const contextMessage =
     context === "saved" ? "Context notes saved." : null;
+  const detailsMessage =
+    details === "saved"
+      ? "Essay details saved."
+      : details === "missing-fields"
+        ? "Please enter essay name, essay question, and module name."
+        : null;
 
   if (!Number.isInteger(essayId) || essayId <= 0) {
     notFound();
@@ -185,9 +237,20 @@ export default async function EssayDetailPage({
           Back to Home
         </Link>
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
-            {essay.title}
-          </h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
+              {essay.name}
+            </h1>
+            <span
+              className="rounded-full px-3 py-1 text-xs font-medium"
+              style={{
+                backgroundColor: sanitizeModuleColor(essay.moduleColor),
+                color: getModuleTextColor(essay.moduleColor),
+              }}
+            >
+              {essay.moduleName}
+            </span>
+          </div>
           <Link
             href={`/essays/${essay.id}/delete`}
             className="inline-flex rounded-md border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
@@ -195,9 +258,89 @@ export default async function EssayDetailPage({
             Delete Essay
           </Link>
         </div>
+        <p className="mt-3 whitespace-pre-wrap rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+          {essay.question}
+        </p>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_1.15fr]">
           <div className="space-y-6">
+            <form
+              action={saveEssayDetails}
+              className="space-y-4 rounded-xl border border-zinc-200 bg-zinc-50/60 p-5"
+            >
+              <input type="hidden" name="essayId" value={essay.id} />
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-700">
+                  Essay Details
+                </h2>
+                <p className="mt-1 text-sm text-zinc-600">
+                  Edit the short name and full assignment question.
+                </p>
+              </div>
+              <label htmlFor="name" className="block text-sm font-medium text-zinc-700">
+                Essay Name
+              </label>
+              <input
+                id="name"
+                name="name"
+                defaultValue={essay.name}
+                className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
+              />
+              <label
+                htmlFor="question"
+                className="block text-sm font-medium text-zinc-700"
+              >
+                Essay Question
+              </label>
+              <textarea
+                id="question"
+                name="question"
+                rows={4}
+                defaultValue={essay.question}
+                className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
+              />
+              <label
+                htmlFor="moduleName"
+                className="block text-sm font-medium text-zinc-700"
+              >
+                Module Name
+              </label>
+              <input
+                id="moduleName"
+                name="moduleName"
+                defaultValue={essay.moduleName}
+                className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
+              />
+              <label
+                htmlFor="moduleColor"
+                className="block text-sm font-medium text-zinc-700"
+              >
+                Module Color
+              </label>
+              <input
+                id="moduleColor"
+                name="moduleColor"
+                type="color"
+                defaultValue={sanitizeModuleColor(essay.moduleColor)}
+                className="h-10 w-20 cursor-pointer rounded-md border border-zinc-300 bg-white p-1"
+              />
+              {detailsMessage && (
+                <p
+                  className={`text-sm ${
+                    details === "saved" ? "text-green-700" : "text-red-600"
+                  }`}
+                >
+                  {detailsMessage}
+                </p>
+              )}
+              <button
+                type="submit"
+                className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-100"
+              >
+                Save Details
+              </button>
+            </form>
+
             <form
               action={createParagraph}
               className="space-y-4 rounded-xl border border-zinc-200 bg-zinc-50/60 p-5"

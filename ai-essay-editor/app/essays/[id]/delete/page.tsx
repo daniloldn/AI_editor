@@ -33,7 +33,7 @@ export default async function DeleteEssayPage({ params }: DeleteEssayPageProps) 
 
   const essay = await prisma.essay.findUnique({
     where: { id: essayId },
-    select: { id: true, title: true },
+    select: { id: true, name: true },
   });
 
   if (!essay) {
@@ -47,7 +47,7 @@ export default async function DeleteEssayPage({ params }: DeleteEssayPageProps) 
           Delete Essay
         </h1>
         <p className="mt-3 text-sm text-zinc-700">
-          Are you sure you want to delete <span className="font-medium">&quot;{essay.title}&quot;</span>?
+          Are you sure you want to delete <span className="font-medium">&quot;{essay.name}&quot;</span>?
         </p>
         <p className="mt-1 text-sm text-zinc-600">
           This also removes all related paragraphs and cannot be undone.

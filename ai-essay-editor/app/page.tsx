@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getModuleTextColor, sanitizeModuleColor } from "@/lib/module-badge";
 import { prisma } from "@/lib/prisma";
 
 export default async function Home() {
@@ -42,8 +43,22 @@ export default async function Home() {
                     href={`/essays/${essay.id}`}
                     className="block rounded-md hover:bg-zinc-50"
                   >
-                    <p className="line-clamp-2 text-base font-semibold text-zinc-900">
-                      {essay.title}
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="line-clamp-2 text-base font-semibold text-zinc-900">
+                        {essay.name}
+                      </p>
+                      <span
+                        className="rounded-full px-2.5 py-1 text-xs font-medium"
+                        style={{
+                          backgroundColor: sanitizeModuleColor(essay.moduleColor),
+                          color: getModuleTextColor(essay.moduleColor),
+                        }}
+                      >
+                        {essay.moduleName}
+                      </span>
+                    </div>
+                    <p className="mt-2 line-clamp-2 text-sm text-zinc-600">
+                      {essay.question}
                     </p>
                     <p className="mt-3 text-xs uppercase tracking-wide text-zinc-500">
                       Created {essay.createdAt.toLocaleDateString()}

@@ -12,7 +12,10 @@ datasource db {
 
 model Essay {
   id         Int         @id @default(autoincrement())
-  title      String
+  name       String      @default("")
+  question   String      @default("")
+  moduleName String      @default("General")
+  moduleColor String     @default("#64748b")
   contextNotes String    @default("")
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
