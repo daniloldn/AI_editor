@@ -13,6 +13,31 @@ type EssayDetailPageProps = {
   searchParams: Promise<{ error?: string; context?: string }>;
 };
 
+function parsePolishResult(storedText: string) {
+  const normalized = storedText.trim();
+  const polishedMatch = normalized.match(
+    /<polished>\s*([\s\S]*?)\s*<\/polished>/i,
+  );
+  const explanationMatch = normalized.match(
+    /<explanation>\s*([\s\S]*?)\s*<\/explanation>/i,
+  );
+
+  if (polishedMatch) {
+    return {
+      polishedParagraph: polishedMatch[1].trim(),
+      explanation: explanationMatch ? explanationMatch[1].trim() : "",
+    };
+  }
+
+  return {
+    polishedParagraph: normalized
+      .replace(/<\/?polished>/gi, "")
+      .replace(/<\/?explanation>/gi, "")
+      .trim(),
+    explanation: "",
+  };
+}
+
 async function createParagraph(formData: FormData) {
   "use server";
 
@@ -55,7 +80,7 @@ async function createParagraph(formData: FormData) {
   }
 
   const previousParagraphsContext = essayForPrompt.paragraphs
-    .map((paragraph) => paragraph.polishedText.trim())
+    .map((paragraph) => parsePolishResult(paragraph.polishedText).polishedParagraph)
     .filter((text) => text.length > 0)
     .join("\n\n");
   const savedEssayContext = essayForPrompt.contextNotes.trim();
@@ -174,6 +199,37 @@ export default async function EssayDetailPage({
         <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_1.15fr]">
           <div className="space-y-6">
             <form
+              action={createParagraph}
+              className="space-y-4 rounded-xl border border-zinc-200 bg-zinc-50/60 p-5"
+            >
+              <input type="hidden" name="essayId" value={essay.id} />
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-700">
+                  Add New Paragraph
+                </h2>
+                <p className="mt-1 text-sm text-zinc-600">
+                  Write a paragraph and let the editor polish it.
+                </p>
+              </div>
+              <textarea
+                id="paragraph"
+                name="paragraph"
+                rows={8}
+                placeholder="Write your paragraph here..."
+                className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
+              />
+              {errorMessage && (
+                <p className="text-sm text-red-600">{errorMessage}</p>
+              )}
+              <button
+                type="submit"
+                className="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                Polish Paragraph
+              </button>
+            </form>
+
+            <form
               action={saveEssayContext}
               className="space-y-4 rounded-xl border border-zinc-200 bg-zinc-50/60 p-5"
             >
@@ -204,37 +260,6 @@ export default async function EssayDetailPage({
                 Save Context
               </button>
             </form>
-
-            <form
-              action={createParagraph}
-              className="space-y-4 rounded-xl border border-zinc-200 bg-zinc-50/60 p-5"
-            >
-              <input type="hidden" name="essayId" value={essay.id} />
-              <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-700">
-                  Add New Paragraph
-                </h2>
-                <p className="mt-1 text-sm text-zinc-600">
-                  Write a paragraph and let the editor polish it.
-                </p>
-              </div>
-              <textarea
-                id="paragraph"
-                name="paragraph"
-                rows={8}
-                placeholder="Write your paragraph here..."
-                className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
-              />
-              {errorMessage && (
-                <p className="text-sm text-red-600">{errorMessage}</p>
-              )}
-              <button
-                type="submit"
-                className="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
-              >
-                Polish Paragraph
-              </button>
-            </form>
           </div>
 
           <section className="rounded-xl border border-zinc-200 bg-white p-5">
@@ -245,22 +270,43 @@ export default async function EssayDetailPage({
               <p className="mt-4 text-sm text-zinc-600">No polished paragraphs yet.</p>
             ) : (
               <ul className="mt-4 space-y-4">
-                {essay.paragraphs.map((paragraph) => (
-                  <li
-                    key={paragraph.id}
-                    className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-4"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                        Paragraph {paragraph.order}
-                      </p>
-                      <CopyParagraphButton text={paragraph.polishedText} />
-                    </div>
-                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-800">
-                      {paragraph.polishedText}
-                    </p>
-                  </li>
-                ))}
+                {essay.paragraphs.map((paragraph) => {
+                  const parsed = parsePolishResult(paragraph.polishedText);
+
+                  return (
+                    <li
+                      key={paragraph.id}
+                      className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-4"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Paragraph {paragraph.order}
+                        </p>
+                        <CopyParagraphButton text={parsed.polishedParagraph} />
+                      </div>
+
+                      <div className="mt-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-600">
+                          Polished Paragraph
+                        </p>
+                        <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-zinc-800">
+                          {parsed.polishedParagraph}
+                        </p>
+                      </div>
+
+                      {parsed.explanation && (
+                        <div className="mt-4 border-t border-zinc-200 pt-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-600">
+                            Explanation of Changes
+                          </p>
+                          <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-zinc-700">
+                            {parsed.explanation}
+                          </p>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>
