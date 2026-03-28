@@ -1,15 +1,16 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import {
+  OpenAIKeyMissingError,
+  polishParagraphWithOpenAI,
+  PromptInterpolationError,
+} from "@/lib/openai";
 import { prisma } from "@/lib/prisma";
 
 type EssayDetailPageProps = {
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string }>;
 };
-
-function createPlaceholderPolish(originalText: string) {
-  return `Polished placeholder (OpenAI not connected yet):\n\n${originalText}`;
-}
 
 async function createParagraph(formData: FormData) {
   "use server";
@@ -36,7 +37,44 @@ async function createParagraph(formData: FormData) {
   });
 
   const nextOrder = lastParagraph ? lastParagraph.order + 1 : 1;
-  const polishedText = createPlaceholderPolish(originalText);
+  const essayForPrompt = await prisma.essay.findUnique({
+    where: { id: essayId },
+    select: {
+      title: true,
+      paragraphs: {
+        orderBy: { order: "asc" },
+        select: { polishedText: true },
+      },
+    },
+  });
+
+  if (!essayForPrompt) {
+    redirect("/");
+  }
+
+  const context = essayForPrompt.paragraphs
+    .map((paragraph) => paragraph.polishedText.trim())
+    .filter((text) => text.length > 0)
+    .join("\n\n");
+
+  let polishedText: string;
+
+  try {
+    polishedText = await polishParagraphWithOpenAI({
+      question: essayForPrompt.title,
+      polish_paragraph: originalText,
+      context,
+    });
+  } catch (error) {
+    if (error instanceof OpenAIKeyMissingError) {
+      redirect(`/essays/${essayId}?error=missing-openai-key`);
+    }
+    if (error instanceof PromptInterpolationError) {
+      redirect(`/essays/${essayId}?error=invalid-prompt-variables`);
+    }
+
+    redirect(`/essays/${essayId}?error=polish-failed`);
+  }
 
   await prisma.paragraph.create({
     data: {
@@ -57,7 +95,16 @@ export default async function EssayDetailPage({
   const { id } = await params;
   const { error } = await searchParams;
   const essayId = Number(id);
-  const showParagraphError = error === "missing-paragraph";
+  const errorMessage =
+    error === "missing-paragraph"
+      ? "Please enter a paragraph."
+      : error === "missing-openai-key"
+        ? "OpenAI API key is missing. Add OPENAI_API_KEY to your .env file."
+        : error === "invalid-prompt-variables"
+          ? "Prompt variables are missing or invalid. Check prompt placeholders."
+        : error === "polish-failed"
+          ? "Could not polish the paragraph right now. Please try again."
+          : null;
 
   if (!Number.isInteger(essayId) || essayId <= 0) {
     notFound();
@@ -99,9 +146,7 @@ export default async function EssayDetailPage({
             placeholder="Write your paragraph here..."
             className="w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
           />
-          {showParagraphError && (
-            <p className="text-sm text-red-600">Please enter a paragraph.</p>
-          )}
+          {errorMessage && <p className="text-sm text-red-600">{errorMessage}</p>}
           <button
             type="submit"
             className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
