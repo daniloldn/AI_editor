@@ -35,7 +35,7 @@ export default function CopyParagraphButton({
     <button
       type="button"
       onClick={handleCopy}
-      className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
+      className="rounded-md border border-accent px-2.5 py-1 text-xs font-medium text-secondary hover:bg-surface-strong"
     >
       {label}
     </button>

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { Prisma } from "@prisma/client";
+import SubmitButton from "@/app/components/submit-button";
 import CopyParagraphButton from "./copy-paragraph-button";
 import {
   DEFAULT_MODULE_COLOR,
@@ -43,26 +45,32 @@ async function createParagraph(formData: FormData) {
     redirect(`/essays/${essayId}?error=missing-paragraph`);
   }
 
-  const lastParagraph = await prisma.paragraph.findFirst({
-    where: { essayId },
-    orderBy: { order: "desc" },
-    select: { order: true },
-  });
-
-  const nextOrder = lastParagraph ? lastParagraph.order + 1 : 1;
-  const essayForPrompt = await prisma.essay.findUnique({
-    where: { id: essayId },
-    select: {
-      name: true,
-      question: true,
-      contextNotes: true,
-      references: true,
-      paragraphs: {
-        orderBy: { order: "asc" },
-        select: { polishedText: true },
+  let essayForPrompt:
+    | {
+        name: string;
+        question: string;
+        contextNotes: string;
+        references: string;
+        paragraphs: { polishedText: string }[];
+      }
+    | null = null;
+  try {
+    essayForPrompt = await prisma.essay.findUnique({
+      where: { id: essayId },
+      select: {
+        name: true,
+        question: true,
+        contextNotes: true,
+        references: true,
+        paragraphs: {
+          orderBy: { order: "asc" },
+          select: { polishedText: true },
+        },
       },
-    },
-  });
+    });
+  } catch {
+    redirect(`/essays/${essayId}?error=db-read-failed`);
+  }
 
   if (!essayForPrompt) {
     redirect("/");
@@ -106,16 +114,46 @@ async function createParagraph(formData: FormData) {
     redirect(`/essays/${essayId}?error=polish-failed`);
   }
 
-  await prisma.paragraph.create({
-    data: {
-      essayId,
-      originalText,
-      polishedText,
-      order: nextOrder,
-    },
-  });
+  // Retry once if two requests race to claim the same order value.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await prisma.$transaction(async (tx) => {
+        const lastParagraph = await tx.paragraph.findFirst({
+          where: { essayId },
+          orderBy: { order: "desc" },
+          select: { order: true },
+        });
+        const nextOrder = lastParagraph ? lastParagraph.order + 1 : 1;
 
-  redirect(`/essays/${essayId}`);
+        await tx.paragraph.create({
+          data: {
+            essayId,
+            originalText,
+            polishedText,
+            order: nextOrder,
+          },
+        });
+      });
+
+      redirect(`/essays/${essayId}`);
+    } catch (error) {
+      const isUniqueOrderConflict =
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002";
+
+      if (isUniqueOrderConflict && attempt === 0) {
+        continue;
+      }
+
+      redirect(
+        isUniqueOrderConflict
+          ? `/essays/${essayId}?error=order-conflict`
+          : `/essays/${essayId}?error=db-save-failed`,
+      );
+    }
+  }
+
+  redirect(`/essays/${essayId}?error=order-conflict`);
 }
 
 async function saveEssayContext(formData: FormData) {
@@ -131,10 +169,14 @@ async function saveEssayContext(formData: FormData) {
     redirect("/");
   }
 
-  await prisma.essay.update({
-    where: { id: essayId },
-    data: { contextNotes },
-  });
+  try {
+    await prisma.essay.update({
+      where: { id: essayId },
+      data: { contextNotes },
+    });
+  } catch {
+    redirect(`/essays/${essayId}?context=failed`);
+  }
 
   redirect(`/essays/${essayId}?context=saved`);
 }
@@ -152,10 +194,14 @@ async function saveEssayReferences(formData: FormData) {
     redirect("/");
   }
 
-  await prisma.essay.update({
-    where: { id: essayId },
-    data: { references },
-  });
+  try {
+    await prisma.essay.update({
+      where: { id: essayId },
+      data: { references },
+    });
+  } catch {
+    redirect(`/essays/${essayId}?references=failed`);
+  }
 
   redirect(`/essays/${essayId}?references=saved`);
 }
@@ -186,10 +232,14 @@ async function saveEssayDetails(formData: FormData) {
     redirect(`/essays/${essayId}?details=missing-fields`);
   }
 
-  await prisma.essay.update({
-    where: { id: essayId },
-    data: { name, question, moduleName, moduleColor },
-  });
+  try {
+    await prisma.essay.update({
+      where: { id: essayId },
+      data: { name, question, moduleName, moduleColor },
+    });
+  } catch {
+    redirect(`/essays/${essayId}?details=failed`);
+  }
 
   redirect(`/essays/${essayId}?details=saved`);
 }
@@ -206,6 +256,12 @@ export default async function EssayDetailPage({
       ? "Please enter a paragraph."
       : error === "missing-question"
         ? "Essay question is required before polishing."
+      : error === "db-read-failed"
+        ? "Could not read essay data right now. Please refresh and try again."
+      : error === "db-save-failed"
+        ? "Could not save the paragraph right now. Please try again."
+      : error === "order-conflict"
+        ? "Another paragraph was saved at the same time. Please submit again."
       : error === "citation-integrity"
         ? "Citation markers changed during polishing. Try again with clearer references."
       : error === "missing-openai-key"
@@ -216,46 +272,89 @@ export default async function EssayDetailPage({
           ? "Could not polish the paragraph right now. Please try again."
           : null;
   const contextMessage =
-    context === "saved" ? "Context notes saved." : null;
+    context === "saved"
+      ? "Context notes saved."
+      : context === "failed"
+        ? "Could not save context notes right now."
+        : null;
   const referencesMessage =
-    references === "saved" ? "References saved." : null;
+    references === "saved"
+      ? "References saved."
+      : references === "failed"
+        ? "Could not save references right now."
+        : null;
   const detailsMessage =
     details === "saved"
       ? "Essay details saved."
       : details === "missing-fields"
         ? "Please enter essay name, essay question, and module name."
+        : details === "failed"
+          ? "Could not save essay details right now."
         : null;
 
   if (!Number.isInteger(essayId) || essayId <= 0) {
     notFound();
   }
 
-  const essay = await prisma.essay.findUnique({
-    where: { id: essayId },
-    include: {
-      paragraphs: {
-        orderBy: { order: "asc" },
+  let essay:
+    | (Awaited<ReturnType<typeof prisma.essay.findUnique>> & {
+        paragraphs: {
+          id: number;
+          order: number;
+          originalText: string;
+          polishedText: string;
+          createdAt: Date;
+          essayId: number;
+        }[];
+      })
+    | null = null;
+  let loadFailed = false;
+
+  try {
+    essay = await prisma.essay.findUnique({
+      where: { id: essayId },
+      include: {
+        paragraphs: {
+          orderBy: { order: "asc" },
+        },
       },
-    },
-  });
+    });
+  } catch {
+    loadFailed = true;
+  }
+
+  if (loadFailed) {
+    return (
+      <main className="min-h-screen bg-surface p-6 md:p-10">
+        <section className="mx-auto w-full max-w-4xl rounded-2xl border border-red-200 bg-red-50 p-6 shadow-sm md:p-8">
+          <Link href="/" className="text-sm text-zinc-600 hover:text-zinc-900">
+            Back to Home
+          </Link>
+          <p className="mt-3 text-sm text-red-700">
+            Could not load this essay right now. Please refresh and try again.
+          </p>
+        </section>
+      </main>
+    );
+  }
 
   if (!essay) {
     notFound();
   }
 
   return (
-    <main className="min-h-screen bg-zinc-100/60 p-6 md:p-10">
-      <section className="mx-auto w-full max-w-4xl rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm md:p-8">
+    <main className="min-h-screen bg-surface p-6 md:p-10">
+      <section className="mx-auto w-full max-w-4xl rounded-2xl border border-accent bg-white p-6 shadow-sm md:p-8">
         <Link href="/" className="text-sm text-zinc-600 hover:text-zinc-900">
           Back to Home
         </Link>
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-3xl font-semibold tracking-tight text-secondary">
               {essay.name}
             </h1>
             <span
-              className="rounded-full px-3 py-1 text-xs font-medium"
+              className="rounded-full px-3 py-1 text-xs font-medium ring-1 ring-black/10"
               style={{
                 backgroundColor: sanitizeModuleColor(essay.moduleColor),
                 color: getModuleTextColor(essay.moduleColor),
@@ -274,12 +373,12 @@ export default async function EssayDetailPage({
         <div className="mt-3">
           <Link
             href={`/essays/${essay.id}/full`}
-            className="inline-flex rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-100"
+            className="inline-flex rounded-md border border-accent px-3 py-2 text-sm font-medium text-secondary hover:bg-surface-strong"
           >
             View Full Essay
           </Link>
         </div>
-        <p className="mt-3 whitespace-pre-wrap rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+        <p className="mt-3 whitespace-pre-wrap rounded-lg border border-accent bg-surface p-3 text-sm text-zinc-700">
           {essay.question}
         </p>
 
@@ -287,11 +386,11 @@ export default async function EssayDetailPage({
           <div className="space-y-6">
             <form
               action={saveEssayDetails}
-              className="space-y-4 rounded-xl border border-zinc-200 bg-zinc-50/60 p-5"
+              className="space-y-4 rounded-xl border border-accent bg-surface p-5"
             >
               <input type="hidden" name="essayId" value={essay.id} />
               <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-700">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-secondary">
                   Essay Details
                 </h2>
                 <p className="mt-1 text-sm text-zinc-600">
@@ -347,6 +446,8 @@ export default async function EssayDetailPage({
               />
               {detailsMessage && (
                 <p
+                  role="status"
+                  aria-live="polite"
                   className={`text-sm ${
                     details === "saved" ? "text-green-700" : "text-red-600"
                   }`}
@@ -354,21 +455,20 @@ export default async function EssayDetailPage({
                   {detailsMessage}
                 </p>
               )}
-              <button
-                type="submit"
-                className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-100"
-              >
-                Save Details
-              </button>
+              <SubmitButton
+                idleLabel="Save Details"
+                pendingLabel="Saving..."
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-strong disabled:cursor-not-allowed disabled:opacity-70"
+              />
             </form>
 
             <form
               action={createParagraph}
-              className="space-y-4 rounded-xl border border-zinc-200 bg-zinc-50/60 p-5"
+              className="space-y-4 rounded-xl border border-accent bg-surface p-5"
             >
               <input type="hidden" name="essayId" value={essay.id} />
               <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-700">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-secondary">
                   Add New Paragraph
                 </h2>
                 <p className="mt-1 text-sm text-zinc-600">
@@ -383,23 +483,24 @@ export default async function EssayDetailPage({
                 className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
               />
               {errorMessage && (
-                <p className="text-sm text-red-600">{errorMessage}</p>
+                <p className="text-sm text-red-600" role="status" aria-live="polite">
+                  {errorMessage}
+                </p>
               )}
-              <button
-                type="submit"
-                className="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
-              >
-                Polish Paragraph
-              </button>
+              <SubmitButton
+                idleLabel="Polish Paragraph"
+                pendingLabel="Polishing..."
+                className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-strong disabled:cursor-not-allowed disabled:opacity-70"
+              />
             </form>
 
             <form
               action={saveEssayContext}
-              className="space-y-4 rounded-xl border border-zinc-200 bg-zinc-50/60 p-5"
+              className="space-y-4 rounded-xl border border-accent bg-surface p-5"
             >
               <input type="hidden" name="essayId" value={essay.id} />
               <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-700">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-secondary">
                   Context Notes
                 </h2>
                 <p className="mt-1 text-sm text-zinc-600">
@@ -415,23 +516,30 @@ export default async function EssayDetailPage({
                 className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
               />
               {contextMessage && (
-                <p className="text-sm text-green-700">{contextMessage}</p>
+                <p
+                  role="status"
+                  aria-live="polite"
+                  className={`text-sm ${
+                    context === "saved" ? "text-green-700" : "text-red-600"
+                  }`}
+                >
+                  {contextMessage}
+                </p>
               )}
-              <button
-                type="submit"
-                className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-100"
-              >
-                Save Context
-              </button>
+              <SubmitButton
+                idleLabel="Save Context"
+                pendingLabel="Saving..."
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-strong disabled:cursor-not-allowed disabled:opacity-70"
+              />
             </form>
 
             <form
               action={saveEssayReferences}
-              className="space-y-4 rounded-xl border border-zinc-200 bg-zinc-50/60 p-5"
+              className="space-y-4 rounded-xl border border-accent bg-surface p-5"
             >
               <input type="hidden" name="essayId" value={essay.id} />
               <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-700">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-secondary">
                   References
                 </h2>
                 <p className="mt-1 text-sm text-zinc-600">
@@ -447,19 +555,26 @@ export default async function EssayDetailPage({
                 className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
               />
               {referencesMessage && (
-                <p className="text-sm text-green-700">{referencesMessage}</p>
+                <p
+                  role="status"
+                  aria-live="polite"
+                  className={`text-sm ${
+                    references === "saved" ? "text-green-700" : "text-red-600"
+                  }`}
+                >
+                  {referencesMessage}
+                </p>
               )}
-              <button
-                type="submit"
-                className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-100"
-              >
-                Save References
-              </button>
+              <SubmitButton
+                idleLabel="Save References"
+                pendingLabel="Saving..."
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-strong disabled:cursor-not-allowed disabled:opacity-70"
+              />
             </form>
           </div>
 
-          <section className="rounded-xl border border-zinc-200 bg-white p-5">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-700">
+          <section className="rounded-xl border border-accent bg-white p-5">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-secondary">
               Paragraph History
             </h2>
             {essay.paragraphs.length === 0 ? (
@@ -472,7 +587,7 @@ export default async function EssayDetailPage({
                   return (
                     <li
                       key={paragraph.id}
-                      className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-4"
+                      className="rounded-lg border border-accent bg-surface p-4"
                     >
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">

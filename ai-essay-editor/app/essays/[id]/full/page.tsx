@@ -98,14 +98,48 @@ export default async function FullEssayPage({
     notFound();
   }
 
-  const essay = await prisma.essay.findUnique({
-    where: { id: essayId },
-    include: {
-      paragraphs: {
-        orderBy: { order: "asc" },
+  let essay:
+    | (Awaited<ReturnType<typeof prisma.essay.findUnique>> & {
+        paragraphs: {
+          id: number;
+          order: number;
+          originalText: string;
+          polishedText: string;
+        }[];
+      })
+    | null = null;
+  let loadFailed = false;
+
+  try {
+    essay = await prisma.essay.findUnique({
+      where: { id: essayId },
+      include: {
+        paragraphs: {
+          orderBy: { order: "asc" },
+        },
       },
-    },
-  });
+    });
+  } catch {
+    loadFailed = true;
+  }
+
+  if (loadFailed) {
+    return (
+      <main className="min-h-screen bg-surface p-6 md:p-10">
+        <section className="mx-auto w-full max-w-4xl rounded-2xl border border-red-200 bg-red-50 p-6 shadow-sm md:p-8">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <Link href="/" className="text-zinc-600 hover:text-zinc-900">
+              Home
+            </Link>
+          </div>
+          <p className="mt-3 text-sm text-red-700">
+            Could not load this full essay view right now. Please refresh and try
+            again.
+          </p>
+        </section>
+      </main>
+    );
+  }
 
   if (!essay) {
     notFound();
@@ -129,8 +163,8 @@ export default async function FullEssayPage({
     selectedView === "original" ? "Copy Original Essay" : "Copy Full Essay";
 
   return (
-    <main className="min-h-screen bg-zinc-100/60 p-6 md:p-10">
-      <section className="mx-auto w-full max-w-4xl rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm md:p-8">
+    <main className="min-h-screen bg-surface p-6 md:p-10">
+      <section className="mx-auto w-full max-w-4xl rounded-2xl border border-accent bg-white p-6 shadow-sm md:p-8">
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <Link href="/" className="text-zinc-600 hover:text-zinc-900">
             Home
@@ -141,14 +175,14 @@ export default async function FullEssayPage({
           </Link>
         </div>
 
-        <div className="mt-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-3xl font-semibold tracking-tight text-secondary">
               {essay.name}
             </h1>
             {essay.moduleName.trim() && (
               <span
-                className="rounded-full px-3 py-1 text-xs font-medium"
+                className="rounded-full px-3 py-1 text-xs font-medium ring-1 ring-black/10"
                 style={{
                   backgroundColor: sanitizeModuleColor(essay.moduleColor),
                   color: getModuleTextColor(essay.moduleColor),
@@ -163,7 +197,7 @@ export default async function FullEssayPage({
           )}
         </div>
 
-        <p className="mt-3 whitespace-pre-wrap rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+        <p className="mt-3 whitespace-pre-wrap rounded-lg border border-accent bg-surface p-3 text-sm text-zinc-700">
           {essay.question}
         </p>
 
@@ -172,8 +206,8 @@ export default async function FullEssayPage({
             href={`/essays/${essay.id}/full?view=polished`}
             className={`rounded-md border px-3 py-1.5 text-sm font-medium ${
               selectedView === "polished"
-                ? "border-zinc-900 bg-zinc-900 text-white"
-                : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
+                ? "border-primary bg-primary text-white"
+                : "border-accent text-secondary hover:bg-surface-strong"
             }`}
           >
             Polished View
@@ -182,8 +216,8 @@ export default async function FullEssayPage({
             href={`/essays/${essay.id}/full?view=original`}
             className={`rounded-md border px-3 py-1.5 text-sm font-medium ${
               selectedView === "original"
-                ? "border-zinc-900 bg-zinc-900 text-white"
-                : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
+                ? "border-primary bg-primary text-white"
+                : "border-accent text-secondary hover:bg-surface-strong"
             }`}
           >
             Original View
@@ -192,8 +226,8 @@ export default async function FullEssayPage({
             href={`/essays/${essay.id}/full?view=compare`}
             className={`rounded-md border px-3 py-1.5 text-sm font-medium ${
               selectedView === "compare"
-                ? "border-zinc-900 bg-zinc-900 text-white"
-                : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
+                ? "border-primary bg-primary text-white"
+                : "border-accent text-secondary hover:bg-surface-strong"
             }`}
           >
             Compare View
@@ -201,13 +235,13 @@ export default async function FullEssayPage({
         </div>
 
         {selectedView === "polished" && hasPolishedEssay && (
-          <article className="mt-6 whitespace-pre-wrap rounded-lg border border-zinc-200 bg-zinc-50/40 p-5 text-sm leading-7 text-zinc-800">
+          <article className="mt-6 whitespace-pre-wrap rounded-lg border border-accent bg-surface p-5 text-sm leading-7 text-zinc-800">
             {polishedFullEssayText}
           </article>
         )}
 
         {selectedView === "original" && hasOriginalEssay && (
-          <article className="mt-6 whitespace-pre-wrap rounded-lg border border-zinc-200 bg-zinc-50/40 p-5 text-sm leading-7 text-zinc-800">
+          <article className="mt-6 whitespace-pre-wrap rounded-lg border border-accent bg-surface p-5 text-sm leading-7 text-zinc-800">
             {originalFullEssayText}
           </article>
         )}
@@ -225,14 +259,14 @@ export default async function FullEssayPage({
               return (
                 <section
                   key={paragraph.id}
-                  className="rounded-lg border border-zinc-200 bg-white"
+                  className="rounded-lg border border-accent bg-white"
                 >
-                  <div className="border-b border-zinc-200 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                  <div className="border-b border-accent px-4 py-2 text-xs font-semibold uppercase tracking-wide text-secondary">
                     Paragraph {paragraph.order}
                   </div>
                   <div className="grid gap-0 md:grid-cols-2">
-                    <div className="border-b border-zinc-200 p-4 md:border-b-0 md:border-r">
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-600">
+                    <div className="border-b border-accent p-4 md:border-b-0 md:border-r">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-secondary">
                         Original
                       </p>
                       <p className="text-sm leading-7 text-zinc-800">
@@ -255,7 +289,7 @@ export default async function FullEssayPage({
                       </p>
                     </div>
                     <div className="p-4">
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-600">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-secondary">
                         Polished
                       </p>
                       <p className="text-sm leading-7 text-zinc-800">
@@ -287,7 +321,7 @@ export default async function FullEssayPage({
         {((selectedView === "polished" && !hasPolishedEssay) ||
           (selectedView === "compare" && !hasPolishedEssay) ||
           (selectedView === "original" && !hasOriginalEssay)) && (
-          <div className="mt-6 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-8">
+          <div className="mt-6 rounded-lg border border-dashed border-accent bg-surface p-8">
             <p className="text-zinc-700">No polished paragraphs yet.</p>
             <p className="mt-1 text-sm text-zinc-600">
               Add and polish paragraphs from the essay detail page, then come back

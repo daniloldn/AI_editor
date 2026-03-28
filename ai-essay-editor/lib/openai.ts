@@ -1,3 +1,5 @@
+import "server-only";
+
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
 const OPENAI_MODEL = "gpt-4.1-mini";
 
@@ -121,16 +123,27 @@ function buildPrompt(template: string, variables: PromptVariables) {
   }
 
   let prompt = template;
+  const templatePlaceholders = new Set(
+    (template.match(/\{[a-zA-Z0-9_]+\}/g) ?? []).map((item) =>
+      item.slice(1, -1),
+    ),
+  );
 
-  for (const [key, value] of Object.entries(variables)) {
+  for (const key of templatePlaceholders) {
+    const value = variables[key as keyof PromptVariables];
+    if (typeof value !== "string") {
+      throw new PromptInterpolationError(`Missing required variable: ${key}`);
+    }
     const token = `{${key}}`;
     prompt = prompt.split(token).join(value);
   }
 
-  const unresolved = prompt.match(/\{[a-zA-Z0-9_]+\}/g);
+  const unresolved = [...templatePlaceholders].filter((key) =>
+    prompt.includes(`{${key}}`),
+  );
   if (unresolved && unresolved.length > 0) {
     throw new PromptInterpolationError(
-      `Unresolved prompt placeholders: ${unresolved.join(", ")}`,
+      `Unresolved prompt placeholders: ${unresolved.map((key) => `{${key}}`).join(", ")}`,
     );
   }
 
@@ -218,6 +231,7 @@ export async function polishParagraphWithOpenAI(variables: PromptVariables) {
   try {
     const response = await fetch(OPENAI_API_URL, {
       method: "POST",
+      cache: "no-store",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,

@@ -5,6 +5,7 @@ import {
   sanitizeModuleColor,
 } from "@/lib/module-badge";
 import { prisma } from "@/lib/prisma";
+import SubmitButton from "@/app/components/submit-button";
 
 type NewEssayPageProps = {
   searchParams: Promise<{ error?: string }>;
@@ -31,21 +32,28 @@ async function createEssay(formData: FormData) {
     redirect("/essays/new?error=missing-fields");
   }
 
-  const essay = await prisma.essay.create({
-    data: { name, question, moduleName, moduleColor },
-  });
+  let essayId: number;
+  try {
+    const essay = await prisma.essay.create({
+      data: { name, question, moduleName, moduleColor },
+    });
+    essayId = essay.id;
+  } catch {
+    redirect("/essays/new?error=create-failed");
+  }
 
-  redirect(`/essays/${essay.id}`);
+  redirect(`/essays/${essayId}`);
 }
 
 export default async function NewEssayPage({ searchParams }: NewEssayPageProps) {
   const { error } = await searchParams;
   const showFieldsError = error === "missing-fields";
+  const showCreateError = error === "create-failed";
 
   return (
-    <main className="min-h-screen bg-zinc-50 p-6 md:p-10">
-      <section className="mx-auto w-full max-w-2xl rounded-xl border border-zinc-200 bg-white p-6 shadow-sm md:p-8">
-        <h1 className="text-2xl font-semibold text-zinc-900">New Essay</h1>
+    <main className="min-h-screen bg-surface p-6 md:p-10">
+      <section className="mx-auto w-full max-w-2xl rounded-xl border border-accent bg-white p-6 shadow-sm md:p-8">
+        <h1 className="text-2xl font-semibold text-secondary">New Essay</h1>
         <p className="mt-2 text-zinc-600">
           Add a short name and full essay question to create a new draft.
         </p>
@@ -102,22 +110,26 @@ export default async function NewEssayPage({ searchParams }: NewEssayPageProps) 
           />
 
           {showFieldsError && (
-            <p className="text-sm text-red-600">
+            <p className="text-sm text-red-600" role="status" aria-live="polite">
               Please enter essay name, essay question, and module name.
             </p>
           )}
+          {showCreateError && (
+            <p className="text-sm text-red-600" role="status" aria-live="polite">
+              Could not create the essay right now. Please try again.
+            </p>
+          )}
 
-          <button
-            type="submit"
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
-          >
-            Create Essay
-          </button>
+          <SubmitButton
+            idleLabel="Create Essay"
+            pendingLabel="Creating..."
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-strong disabled:cursor-not-allowed disabled:opacity-70"
+          />
         </form>
 
         <Link
           href="/"
-          className="mt-6 inline-block rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-100"
+          className="mt-6 inline-block rounded-md border border-accent px-4 py-2 text-sm font-medium text-secondary hover:bg-surface-strong"
         >
           Back to Home
         </Link>
