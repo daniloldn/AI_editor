@@ -12,9 +12,22 @@ datasource db {
 }
 
 model Essay {
-  id        Int      @id @default(autoincrement())
-  title     String
-  content   String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         Int         @id @default(autoincrement())
+  title      String
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  paragraphs Paragraph[]
+}
+
+model Paragraph {
+  id           Int      @id @default(autoincrement())
+  essayId      Int
+  originalText String
+  polishedText String
+  order        Int
+  createdAt    DateTime @default(now())
+  essay        Essay    @relation(fields: [essayId], references: [id], onDelete: Cascade)
+
+  @@index([essayId])
+  @@unique([essayId, order])
 }
