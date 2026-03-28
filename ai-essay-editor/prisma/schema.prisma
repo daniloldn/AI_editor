@@ -17,6 +17,7 @@ model Essay {
   moduleName String      @default("General")
   moduleColor String     @default("#64748b")
   contextNotes String    @default("")
+  references String      @default("")
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
   paragraphs Paragraph[]

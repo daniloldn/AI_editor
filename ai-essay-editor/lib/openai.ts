@@ -10,6 +10,7 @@ Your task is to improve a paragraph for clarity, grammar, academic tone, and log
 Constraints:
 Do NOT change the original meaning.
 Do NOT add new information or interpretations.
+Do NOT remove headings
 Preserve technical terminology unless it is clearly incorrect.
 Make only necessary edits (avoid over-rewriting).
 Prefer small, local edits over full sentence rewrites where possible.
@@ -71,10 +72,18 @@ export class PromptInterpolationError extends Error {
   }
 }
 
+export class CitationIntegrityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CitationIntegrityError";
+  }
+}
+
 type PromptVariables = {
   question: string;
   polish_paragraph: string;
   context: string;
+  references?: string;
 };
 
 type OpenAIResponse = {
@@ -147,6 +156,51 @@ function extractPolishedText(data: OpenAIResponse) {
   return "";
 }
 
+function buildCitationSafetyRules(references: string) {
+  const referenceBlock = references.trim()
+    ? `Provided reference list (use only these references):\n${references.trim()}`
+    : "Provided reference list: (none provided)";
+
+  return `
+Citation integrity rules (must follow strictly):
+- Preserve all citation markers from the input paragraph exactly as written.
+- Do not change citation numbering or marker formatting.
+- Do not invent any new citations.
+- Do not remove existing citations.
+
+${referenceBlock}
+`;
+}
+
+function extractCitationMarkers(text: string) {
+  const bracketStyle = text.match(/\[[^\[\]\n]{1,80}\]/g) ?? [];
+  const parentheticalStyle =
+    text.match(/\([A-Za-z][^()\n]{0,80}\d{4}[a-z]?[^()\n]{0,40}\)/g) ?? [];
+  return [...bracketStyle, ...parentheticalStyle].map((marker) => marker.trim());
+}
+
+function haveSameMarkerMultiset(a: string[], b: string[]) {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  const counts = new Map<string, number>();
+
+  for (const marker of a) {
+    counts.set(marker, (counts.get(marker) ?? 0) + 1);
+  }
+
+  for (const marker of b) {
+    const next = (counts.get(marker) ?? 0) - 1;
+    if (next < 0) {
+      return false;
+    }
+    counts.set(marker, next);
+  }
+
+  return [...counts.values()].every((count) => count === 0);
+}
+
 export async function polishParagraphWithOpenAI(variables: PromptVariables) {
   const apiKey = process.env.OPENAI_API_KEY;
 
@@ -154,7 +208,10 @@ export async function polishParagraphWithOpenAI(variables: PromptVariables) {
     throw new OpenAIKeyMissingError();
   }
 
-  const prompt = buildPrompt(POLISH_PROMPT_TEMPLATE, variables);
+  const corePrompt = buildPrompt(POLISH_PROMPT_TEMPLATE, variables);
+  const prompt = `${corePrompt}\n\n${buildCitationSafetyRules(
+    variables.references ?? "",
+  )}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
 
@@ -183,11 +240,22 @@ export async function polishParagraphWithOpenAI(variables: PromptVariables) {
       throw new Error("OpenAI API returned empty output.");
     }
 
+    const originalMarkers = extractCitationMarkers(variables.polish_paragraph);
+    if (originalMarkers.length > 0) {
+      const polishedMarkers = extractCitationMarkers(polished);
+      if (!haveSameMarkerMultiset(originalMarkers, polishedMarkers)) {
+        throw new CitationIntegrityError(
+          "Citation markers were changed, removed, or added.",
+        );
+      }
+    }
+
     return polished;
   } catch (error) {
     if (
       error instanceof OpenAIKeyMissingError ||
-      error instanceof PromptInterpolationError
+      error instanceof PromptInterpolationError ||
+      error instanceof CitationIntegrityError
     ) {
       throw error;
     }

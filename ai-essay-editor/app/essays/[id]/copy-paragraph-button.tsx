@@ -4,9 +4,13 @@ import { useState } from "react";
 
 type CopyParagraphButtonProps = {
   text: string;
+  idleLabel?: string;
 };
 
-export default function CopyParagraphButton({ text }: CopyParagraphButtonProps) {
+export default function CopyParagraphButton({
+  text,
+  idleLabel = "Copy",
+}: CopyParagraphButtonProps) {
   const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
 
   async function handleCopy() {
@@ -21,7 +25,11 @@ export default function CopyParagraphButton({ text }: CopyParagraphButtonProps) 
   }
 
   const label =
-    status === "copied" ? "Copied" : status === "failed" ? "Failed" : "Copy";
+    status === "copied"
+      ? "Copied"
+      : status === "failed"
+        ? "Failed"
+        : idleLabel;
 
   return (
     <button

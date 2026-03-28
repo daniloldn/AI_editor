@@ -6,7 +6,9 @@ import {
   getModuleTextColor,
   sanitizeModuleColor,
 } from "@/lib/module-badge";
+import { parsePolishResult } from "@/lib/polish-result";
 import {
+  CitationIntegrityError,
   OpenAIKeyMissingError,
   polishParagraphWithOpenAI,
   PromptInterpolationError,
@@ -15,33 +17,13 @@ import { prisma } from "@/lib/prisma";
 
 type EssayDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; context?: string; details?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    context?: string;
+    details?: string;
+    references?: string;
+  }>;
 };
-
-function parsePolishResult(storedText: string) {
-  const normalized = storedText.trim();
-  const polishedMatch = normalized.match(
-    /<polished>\s*([\s\S]*?)\s*<\/polished>/i,
-  );
-  const explanationMatch = normalized.match(
-    /<explanation>\s*([\s\S]*?)\s*<\/explanation>/i,
-  );
-
-  if (polishedMatch) {
-    return {
-      polishedParagraph: polishedMatch[1].trim(),
-      explanation: explanationMatch ? explanationMatch[1].trim() : "",
-    };
-  }
-
-  return {
-    polishedParagraph: normalized
-      .replace(/<\/?polished>/gi, "")
-      .replace(/<\/?explanation>/gi, "")
-      .trim(),
-    explanation: "",
-  };
-}
 
 async function createParagraph(formData: FormData) {
   "use server";
@@ -74,6 +56,7 @@ async function createParagraph(formData: FormData) {
       name: true,
       question: true,
       contextNotes: true,
+      references: true,
       paragraphs: {
         orderBy: { order: "asc" },
         select: { polishedText: true },
@@ -94,6 +77,7 @@ async function createParagraph(formData: FormData) {
     .filter((text) => text.length > 0)
     .join("\n\n");
   const savedEssayContext = essayForPrompt.contextNotes.trim();
+  const savedReferences = essayForPrompt.references.trim();
 
   const context = [savedEssayContext, previousParagraphsContext]
     .filter((part) => part.length > 0)
@@ -106,10 +90,14 @@ async function createParagraph(formData: FormData) {
       question: essayForPrompt.question,
       polish_paragraph: originalText,
       context,
+      references: savedReferences,
     });
   } catch (error) {
     if (error instanceof OpenAIKeyMissingError) {
       redirect(`/essays/${essayId}?error=missing-openai-key`);
+    }
+    if (error instanceof CitationIntegrityError) {
+      redirect(`/essays/${essayId}?error=citation-integrity`);
     }
     if (error instanceof PromptInterpolationError) {
       redirect(`/essays/${essayId}?error=invalid-prompt-variables`);
@@ -151,6 +139,27 @@ async function saveEssayContext(formData: FormData) {
   redirect(`/essays/${essayId}?context=saved`);
 }
 
+async function saveEssayReferences(formData: FormData) {
+  "use server";
+
+  const essayIdValue = formData.get("essayId");
+  const referencesValue = formData.get("references");
+  const essayId = Number(essayIdValue);
+  const references =
+    typeof referencesValue === "string" ? referencesValue.trim() : "";
+
+  if (!Number.isInteger(essayId) || essayId <= 0) {
+    redirect("/");
+  }
+
+  await prisma.essay.update({
+    where: { id: essayId },
+    data: { references },
+  });
+
+  redirect(`/essays/${essayId}?references=saved`);
+}
+
 async function saveEssayDetails(formData: FormData) {
   "use server";
 
@@ -190,13 +199,15 @@ export default async function EssayDetailPage({
   searchParams,
 }: EssayDetailPageProps) {
   const { id } = await params;
-  const { error, context, details } = await searchParams;
+  const { error, context, details, references } = await searchParams;
   const essayId = Number(id);
   const errorMessage =
     error === "missing-paragraph"
       ? "Please enter a paragraph."
       : error === "missing-question"
         ? "Essay question is required before polishing."
+      : error === "citation-integrity"
+        ? "Citation markers changed during polishing. Try again with clearer references."
       : error === "missing-openai-key"
         ? "OpenAI API key is missing. Add OPENAI_API_KEY to your .env file."
         : error === "invalid-prompt-variables"
@@ -206,6 +217,8 @@ export default async function EssayDetailPage({
           : null;
   const contextMessage =
     context === "saved" ? "Context notes saved." : null;
+  const referencesMessage =
+    references === "saved" ? "References saved." : null;
   const detailsMessage =
     details === "saved"
       ? "Essay details saved."
@@ -256,6 +269,14 @@ export default async function EssayDetailPage({
             className="inline-flex rounded-md border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
           >
             Delete Essay
+          </Link>
+        </div>
+        <div className="mt-3">
+          <Link
+            href={`/essays/${essay.id}/full`}
+            className="inline-flex rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-100"
+          >
+            View Full Essay
           </Link>
         </div>
         <p className="mt-3 whitespace-pre-wrap rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
@@ -401,6 +422,38 @@ export default async function EssayDetailPage({
                 className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-100"
               >
                 Save Context
+              </button>
+            </form>
+
+            <form
+              action={saveEssayReferences}
+              className="space-y-4 rounded-xl border border-zinc-200 bg-zinc-50/60 p-5"
+            >
+              <input type="hidden" name="essayId" value={essay.id} />
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-700">
+                  References
+                </h2>
+                <p className="mt-1 text-sm text-zinc-600">
+                  Add reference list entries used by this essay.
+                </p>
+              </div>
+              <textarea
+                id="references"
+                name="references"
+                rows={6}
+                defaultValue={essay.references}
+                placeholder="Add references here, one per line..."
+                className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
+              />
+              {referencesMessage && (
+                <p className="text-sm text-green-700">{referencesMessage}</p>
+              )}
+              <button
+                type="submit"
+                className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-100"
+              >
+                Save References
               </button>
             </form>
           </div>

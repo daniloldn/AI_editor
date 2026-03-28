@@ -72,6 +72,12 @@ export default async function Home() {
                       Open
                     </Link>
                     <Link
+                      href={`/essays/${essay.id}/full`}
+                      className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
+                    >
+                      Full Essay
+                    </Link>
+                    <Link
                       href={`/essays/${essay.id}/delete`}
                       className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
                     >
