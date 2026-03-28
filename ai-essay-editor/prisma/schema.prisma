@@ -13,6 +13,7 @@ datasource db {
 model Essay {
   id         Int         @id @default(autoincrement())
   title      String
+  contextNotes String    @default("")
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
   paragraphs Paragraph[]
