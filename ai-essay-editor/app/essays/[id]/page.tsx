@@ -7,7 +7,10 @@ import {
   getModuleTextColor,
   sanitizeModuleColor,
 } from "@/lib/module-badge";
-import { parsePolishResult } from "@/lib/polish-result";
+import {
+  normalizePolishResultForStorage,
+  parsePolishResult,
+} from "@/lib/polish-result";
 import {
   CitationIntegrityError,
   OpenAIKeyMissingError,
@@ -92,12 +95,17 @@ async function createParagraph(formData: FormData) {
   let polishedText: string;
 
   try {
-    polishedText = await polishParagraphWithOpenAI({
+    const aiResponseText = await polishParagraphWithOpenAI({
       question: essayForPrompt.question,
       polish_paragraph: originalText,
       context,
       references: savedReferences,
     });
+    polishedText = normalizePolishResultForStorage(aiResponseText);
+
+    if (!polishedText) {
+      redirect(`/essays/${essayId}?error=polish-failed`);
+    }
   } catch (error) {
     if (error instanceof OpenAIKeyMissingError) {
       redirect(`/essays/${essayId}?error=missing-openai-key`);
@@ -305,15 +313,17 @@ export default async function EssayDetailPage({
             <h1 className="text-3xl font-semibold tracking-tight text-secondary">
               {essay.name}
             </h1>
-            <span
-              className="rounded-full px-3 py-1 text-xs font-medium ring-1 ring-black/10"
-              style={{
-                backgroundColor: sanitizeModuleColor(essay.moduleColor),
-                color: getModuleTextColor(essay.moduleColor),
-              }}
-            >
-              {essay.moduleName}
-            </span>
+            {essay.moduleName.trim() && (
+              <span
+                className="rounded-full px-3 py-1 text-xs font-medium ring-1 ring-black/10"
+                style={{
+                  backgroundColor: sanitizeModuleColor(essay.moduleColor),
+                  color: getModuleTextColor(essay.moduleColor),
+                }}
+              >
+                {essay.moduleName}
+              </span>
+            )}
           </div>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">

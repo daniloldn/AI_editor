@@ -1,16 +1,37 @@
-export function parsePolishResult(storedText: string) {
-  const normalized = storedText.trim();
-  const polishedMatch = normalized.match(
-    /<polished>\s*([\s\S]*?)\s*<\/polished>/i,
-  );
-  const explanationMatch = normalized.match(
-    /<explanation>\s*([\s\S]*?)\s*<\/explanation>/i,
-  );
+type ParsedPolishResult = {
+  polishedParagraph: string;
+  explanation: string;
+};
 
-  if (polishedMatch) {
+function extractFirstTaggedSection(text: string, tags: string[]) {
+  for (const tag of tags) {
+    const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = text.match(
+      new RegExp(`<${escapedTag}>\\s*([\\s\\S]*?)\\s*<\\/${escapedTag}>`, "i"),
+    );
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+  }
+
+  return "";
+}
+
+export function parsePolishResult(storedText: string): ParsedPolishResult {
+  const normalized = storedText.trim();
+  const polishedParagraph = extractFirstTaggedSection(normalized, [
+    "polished",
+    "polished_paragraph",
+  ]);
+  const explanation = extractFirstTaggedSection(normalized, [
+    "explanation",
+    "explanation_of_changes",
+  ]);
+
+  if (polishedParagraph) {
     return {
-      polishedParagraph: polishedMatch[1].trim(),
-      explanation: explanationMatch ? explanationMatch[1].trim() : "",
+      polishedParagraph,
+      explanation,
     };
   }
 
@@ -26,10 +47,30 @@ export function parsePolishResult(storedText: string) {
 
   return {
     polishedParagraph: normalized
-      .replace(/<\/?polished>/gi, "")
-      .replace(/<\/?explanation>/gi, "")
+      .replace(/<\/?(polished|polished_paragraph)>/gi, "")
+      .replace(/<\/?(explanation|explanation_of_changes)>/gi, "")
       .replace(/\n\s*explanation of changes:\s*[\s\S]*$/i, "")
       .trim(),
     explanation: "",
   };
+}
+
+export function normalizePolishResultForStorage(rawText: string) {
+  const parsed = parsePolishResult(rawText);
+
+  if (!parsed.polishedParagraph) {
+    return "";
+  }
+
+  if (!parsed.explanation) {
+    return parsed.polishedParagraph;
+  }
+
+  return `<polished>
+${parsed.polishedParagraph}
+</polished>
+
+<explanation>
+${parsed.explanation}
+</explanation>`;
 }

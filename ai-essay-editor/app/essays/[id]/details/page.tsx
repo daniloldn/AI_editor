@@ -26,16 +26,17 @@ async function saveEssayDetails(formData: FormData) {
   const question = typeof questionValue === "string" ? questionValue.trim() : "";
   const moduleName =
     typeof moduleNameValue === "string" ? moduleNameValue.trim() : "";
-  const moduleColor =
-    typeof moduleColorValue === "string"
+  const moduleColor = moduleName
+    ? typeof moduleColorValue === "string"
       ? sanitizeModuleColor(moduleColorValue)
-      : DEFAULT_MODULE_COLOR;
+      : DEFAULT_MODULE_COLOR
+    : DEFAULT_MODULE_COLOR;
 
   if (!Number.isInteger(essayId) || essayId <= 0) {
     redirect("/");
   }
 
-  if (!name || !question || !moduleName) {
+  if (!name || !question) {
     redirect(`/essays/${essayId}/details?details=missing-fields`);
   }
 
@@ -62,7 +63,7 @@ export default async function EssayDetailsPage({
     details === "saved"
       ? "Essay details saved."
       : details === "missing-fields"
-        ? "Please enter essay name, essay question, and module name."
+        ? "Please enter essay name and essay question."
         : details === "failed"
           ? "Could not save essay details right now."
           : null;
@@ -133,15 +134,17 @@ export default async function EssayDetailsPage({
           <h1 className="text-3xl font-semibold tracking-tight text-secondary">
             Essay Details
           </h1>
-          <span
-            className="rounded-full px-3 py-1 text-xs font-medium ring-1 ring-black/10"
-            style={{
-              backgroundColor: sanitizeModuleColor(essay.moduleColor),
-              color: getModuleTextColor(essay.moduleColor),
-            }}
-          >
-            {essay.moduleName}
-          </span>
+          {essay.moduleName.trim() && (
+            <span
+              className="rounded-full px-3 py-1 text-xs font-medium ring-1 ring-black/10"
+              style={{
+                backgroundColor: sanitizeModuleColor(essay.moduleColor),
+                color: getModuleTextColor(essay.moduleColor),
+              }}
+            >
+              {essay.moduleName}
+            </span>
+          )}
         </div>
 
         <form
@@ -172,7 +175,7 @@ export default async function EssayDetailsPage({
             htmlFor="moduleName"
             className="block text-sm font-medium text-zinc-700"
           >
-            Module Name
+            Module Name (Optional)
           </label>
           <input
             id="moduleName"

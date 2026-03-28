@@ -23,12 +23,13 @@ async function createEssay(formData: FormData) {
     typeof questionValue === "string" ? questionValue.trim() : "";
   const moduleName =
     typeof moduleNameValue === "string" ? moduleNameValue.trim() : "";
-  const moduleColor =
-    typeof moduleColorValue === "string"
+  const moduleColor = moduleName
+    ? typeof moduleColorValue === "string"
       ? sanitizeModuleColor(moduleColorValue)
-      : DEFAULT_MODULE_COLOR;
+      : DEFAULT_MODULE_COLOR
+    : DEFAULT_MODULE_COLOR;
 
-  if (!name || !question || !moduleName) {
+  if (!name || !question) {
     redirect("/essays/new?error=missing-fields");
   }
 
@@ -38,7 +39,8 @@ async function createEssay(formData: FormData) {
       data: { name, question, moduleName, moduleColor },
     });
     essayId = essay.id;
-  } catch {
+  } catch (error) {
+    console.error("Failed to create essay:", error);
     redirect("/essays/new?error=create-failed");
   }
 
@@ -59,59 +61,67 @@ export default async function NewEssayPage({ searchParams }: NewEssayPageProps) 
         </p>
 
         <form action={createEssay} className="mt-6 space-y-4">
-          <label htmlFor="name" className="block text-sm font-medium text-zinc-700">
-            Essay Name
-          </label>
-          <input
-            id="name"
-            name="name"
-            type="text"
-            placeholder="Short draft name"
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
-          />
-          <label
-            htmlFor="question"
-            className="block text-sm font-medium text-zinc-700"
-          >
-            Essay Question
-          </label>
-          <textarea
-            id="question"
-            name="question"
-            rows={4}
-            placeholder="Paste the full assignment question..."
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
-          />
+          <div>
+            <label htmlFor="name" className="block text-sm font-medium text-zinc-700">
+              Essay Name
+            </label>
+            <input
+              id="name"
+              name="name"
+              type="text"
+              placeholder="Short draft name"
+              className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="question"
+              className="block text-sm font-medium text-zinc-700"
+            >
+              Essay Question
+            </label>
+            <textarea
+              id="question"
+              name="question"
+              rows={4}
+              placeholder="Paste the full assignment question..."
+              className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
+            />
+          </div>
+          <div>
           <label
             htmlFor="moduleName"
             className="block text-sm font-medium text-zinc-700"
           >
-            Module Name
+            Module Name (Optional)
           </label>
-          <input
-            id="moduleName"
-            name="moduleName"
-            type="text"
-            placeholder="Biochemistry 301"
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
-          />
+            <input
+              id="moduleName"
+              name="moduleName"
+              type="text"
+              placeholder="Biochemistry 301"
+              className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 outline-none ring-zinc-400 focus:ring-2"
+            />
+          </div>
+          <div>
           <label
             htmlFor="moduleColor"
             className="block text-sm font-medium text-zinc-700"
           >
-            Module Color
+            Module Color (Optional)
           </label>
-          <input
-            id="moduleColor"
-            name="moduleColor"
-            type="color"
-            defaultValue={DEFAULT_MODULE_COLOR}
-            className="h-10 w-20 cursor-pointer rounded-md border border-zinc-300 bg-white p-1"
-          />
+            <input
+              id="moduleColor"
+              name="moduleColor"
+              type="color"
+              defaultValue={DEFAULT_MODULE_COLOR}
+              className="mt-1 h-10 w-20 cursor-pointer rounded-md border border-zinc-300 bg-white p-1"
+            />
+          </div>
 
           {showFieldsError && (
             <p className="text-sm text-red-600" role="status" aria-live="polite">
-              Please enter essay name, essay question, and module name.
+              Please enter essay name and essay question.
             </p>
           )}
           {showCreateError && (
@@ -120,11 +130,13 @@ export default async function NewEssayPage({ searchParams }: NewEssayPageProps) 
             </p>
           )}
 
-          <SubmitButton
-            idleLabel="Create Essay"
-            pendingLabel="Creating..."
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-strong disabled:cursor-not-allowed disabled:opacity-70"
-          />
+          <div className="pt-2">
+            <SubmitButton
+              idleLabel="Create Essay"
+              pendingLabel="Creating..."
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-strong disabled:cursor-not-allowed disabled:opacity-70"
+            />
+          </div>
         </form>
 
         <Link

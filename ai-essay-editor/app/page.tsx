@@ -2,6 +2,8 @@ import Link from "next/link";
 import { getModuleTextColor, sanitizeModuleColor } from "@/lib/module-badge";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 export default async function Home() {
   let essays: Awaited<ReturnType<typeof prisma.essay.findMany>> = [];
   let loadFailed = false;
@@ -10,7 +12,8 @@ export default async function Home() {
     essays = await prisma.essay.findMany({
       orderBy: { createdAt: "desc" },
     });
-  } catch {
+  } catch (error) {
+    console.error("Failed to load essays on home page:", error);
     loadFailed = true;
   }
 
@@ -60,15 +63,17 @@ export default async function Home() {
                       <p className="line-clamp-2 text-base font-semibold text-secondary">
                         {essay.name}
                       </p>
-                      <span
-                        className="rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-black/10"
-                        style={{
-                          backgroundColor: sanitizeModuleColor(essay.moduleColor),
-                          color: getModuleTextColor(essay.moduleColor),
-                        }}
-                      >
-                        {essay.moduleName}
-                      </span>
+                      {essay.moduleName.trim() && (
+                        <span
+                          className="rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-black/10"
+                          style={{
+                            backgroundColor: sanitizeModuleColor(essay.moduleColor),
+                            color: getModuleTextColor(essay.moduleColor),
+                          }}
+                        >
+                          {essay.moduleName}
+                        </span>
+                      )}
                     </div>
                     <p className="mt-2 line-clamp-2 text-sm text-zinc-600">
                       {essay.question}
