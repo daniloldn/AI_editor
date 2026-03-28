@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import SubmitButton from "@/app/components/submit-button";
+import ConfirmSubmitButton from "./confirm-submit-button";
 import CopyParagraphButton from "./copy-paragraph-button";
 import {
   getModuleTextColor,
@@ -27,6 +28,25 @@ type EssayDetailPageProps = {
     references?: string;
   }>;
 };
+
+async function applyParagraphOrder(
+  tx: Prisma.TransactionClient,
+  orderedParagraphIds: number[],
+) {
+  for (let i = 0; i < orderedParagraphIds.length; i += 1) {
+    await tx.paragraph.update({
+      where: { id: orderedParagraphIds[i] },
+      data: { order: -(i + 1) },
+    });
+  }
+
+  for (let i = 0; i < orderedParagraphIds.length; i += 1) {
+    await tx.paragraph.update({
+      where: { id: orderedParagraphIds[i] },
+      data: { order: i + 1 },
+    });
+  }
+}
 
 async function createParagraph(formData: FormData) {
   "use server";
@@ -121,6 +141,7 @@ async function createParagraph(formData: FormData) {
   }
 
   // Retry once if two requests race to claim the same order value.
+  let paragraphSaved = false;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await prisma.$transaction(async (tx) => {
@@ -140,8 +161,8 @@ async function createParagraph(formData: FormData) {
           },
         });
       });
-
-      redirect(`/essays/${essayId}`);
+      paragraphSaved = true;
+      break;
     } catch (error) {
       const isUniqueOrderConflict =
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -151,12 +172,17 @@ async function createParagraph(formData: FormData) {
         continue;
       }
 
+      console.error("Failed to save paragraph:", error);
       redirect(
         isUniqueOrderConflict
           ? `/essays/${essayId}?error=order-conflict`
           : `/essays/${essayId}?error=db-save-failed`,
       );
     }
+  }
+
+  if (paragraphSaved) {
+    redirect(`/essays/${essayId}`);
   }
 
   redirect(`/essays/${essayId}?error=order-conflict`);
@@ -212,6 +238,105 @@ async function saveEssayReferences(formData: FormData) {
   redirect(`/essays/${essayId}?references=saved`);
 }
 
+async function deleteParagraph(formData: FormData) {
+  "use server";
+
+  const essayIdValue = formData.get("essayId");
+  const paragraphIdValue = formData.get("paragraphId");
+  const essayId = Number(essayIdValue);
+  const paragraphId = Number(paragraphIdValue);
+
+  if (!Number.isInteger(essayId) || essayId <= 0) {
+    redirect("/");
+  }
+
+  if (!Number.isInteger(paragraphId) || paragraphId <= 0) {
+    redirect(`/essays/${essayId}`);
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const paragraphs = await tx.paragraph.findMany({
+        where: { essayId },
+        orderBy: { order: "asc" },
+        select: { id: true },
+      });
+      const existingIds = paragraphs.map((paragraph) => paragraph.id);
+
+      if (!existingIds.includes(paragraphId)) {
+        throw new Error("Paragraph not found for delete.");
+      }
+
+      await tx.paragraph.delete({
+        where: { id: paragraphId },
+      });
+
+      const remainingIds = existingIds.filter((id) => id !== paragraphId);
+      await applyParagraphOrder(tx, remainingIds);
+    });
+  } catch (error) {
+    console.error("Failed to delete paragraph:", error);
+    redirect(`/essays/${essayId}?error=paragraph-delete-failed`);
+  }
+
+  redirect(`/essays/${essayId}`);
+}
+
+async function moveParagraph(formData: FormData) {
+  "use server";
+
+  const essayIdValue = formData.get("essayId");
+  const paragraphIdValue = formData.get("paragraphId");
+  const directionValue = formData.get("direction");
+  const essayId = Number(essayIdValue);
+  const paragraphId = Number(paragraphIdValue);
+  const direction =
+    directionValue === "up" || directionValue === "down" ? directionValue : "";
+
+  if (!Number.isInteger(essayId) || essayId <= 0) {
+    redirect("/");
+  }
+
+  if (!Number.isInteger(paragraphId) || paragraphId <= 0 || !direction) {
+    redirect(`/essays/${essayId}`);
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const paragraphs = await tx.paragraph.findMany({
+        where: { essayId },
+        orderBy: { order: "asc" },
+        select: { id: true },
+      });
+      const orderedIds = paragraphs.map((paragraph) => paragraph.id);
+      const currentIndex = orderedIds.findIndex((id) => id === paragraphId);
+
+      if (currentIndex === -1) {
+        throw new Error("Paragraph not found for reorder.");
+      }
+
+      const targetIndex =
+        direction === "up" ? currentIndex - 1 : currentIndex + 1;
+
+      if (targetIndex < 0 || targetIndex >= orderedIds.length) {
+        return;
+      }
+
+      [orderedIds[currentIndex], orderedIds[targetIndex]] = [
+        orderedIds[targetIndex],
+        orderedIds[currentIndex],
+      ];
+
+      await applyParagraphOrder(tx, orderedIds);
+    });
+  } catch (error) {
+    console.error("Failed to reorder paragraph:", error);
+    redirect(`/essays/${essayId}?error=paragraph-reorder-failed`);
+  }
+
+  redirect(`/essays/${essayId}`);
+}
+
 export default async function EssayDetailPage({
   params,
   searchParams,
@@ -230,6 +355,10 @@ export default async function EssayDetailPage({
         ? "Could not save the paragraph right now. Please try again."
       : error === "order-conflict"
         ? "Another paragraph was saved at the same time. Please submit again."
+      : error === "paragraph-delete-failed"
+        ? "Could not delete the paragraph right now. Please try again."
+      : error === "paragraph-reorder-failed"
+        ? "Could not reorder paragraphs right now. Please try again."
       : error === "citation-integrity"
         ? "Citation markers changed during polishing. Try again with clearer references."
       : error === "missing-openai-key"
@@ -465,8 +594,10 @@ export default async function EssayDetailPage({
               <p className="mt-4 text-sm text-zinc-600">No polished paragraphs yet.</p>
             ) : (
               <ul className="mt-4 space-y-4">
-                {essay.paragraphs.map((paragraph) => {
+                {essay.paragraphs.map((paragraph, index) => {
                   const parsed = parsePolishResult(paragraph.polishedText);
+                  const isFirst = index === 0;
+                  const isLast = index === essay.paragraphs.length - 1;
 
                   return (
                     <li
@@ -477,7 +608,54 @@ export default async function EssayDetailPage({
                         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                           Paragraph {paragraph.order}
                         </p>
-                        <CopyParagraphButton text={parsed.polishedParagraph} />
+                        <div className="flex flex-wrap items-center gap-2">
+                          <form action={moveParagraph}>
+                            <input type="hidden" name="essayId" value={essay.id} />
+                            <input
+                              type="hidden"
+                              name="paragraphId"
+                              value={paragraph.id}
+                            />
+                            <input type="hidden" name="direction" value="up" />
+                            <button
+                              type="submit"
+                              disabled={isFirst}
+                              className="rounded-md border border-accent px-2.5 py-1 text-xs font-medium text-secondary hover:bg-surface-strong disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Move Up
+                            </button>
+                          </form>
+                          <form action={moveParagraph}>
+                            <input type="hidden" name="essayId" value={essay.id} />
+                            <input
+                              type="hidden"
+                              name="paragraphId"
+                              value={paragraph.id}
+                            />
+                            <input type="hidden" name="direction" value="down" />
+                            <button
+                              type="submit"
+                              disabled={isLast}
+                              className="rounded-md border border-accent px-2.5 py-1 text-xs font-medium text-secondary hover:bg-surface-strong disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Move Down
+                            </button>
+                          </form>
+                          <CopyParagraphButton text={parsed.polishedParagraph} />
+                          <form action={deleteParagraph}>
+                            <input type="hidden" name="essayId" value={essay.id} />
+                            <input
+                              type="hidden"
+                              name="paragraphId"
+                              value={paragraph.id}
+                            />
+                            <ConfirmSubmitButton
+                              label="Delete"
+                              confirmMessage="Delete this paragraph? This cannot be undone."
+                              className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+                            />
+                          </form>
+                        </div>
                       </div>
 
                       <div className="mt-3">

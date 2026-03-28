@@ -187,7 +187,7 @@ export default async function EssayDetailsPage({
             htmlFor="moduleColor"
             className="block text-sm font-medium text-zinc-700"
           >
-            Module Color
+            Module Color (Optional)
           </label>
           <input
             id="moduleColor"

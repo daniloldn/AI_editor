@@ -156,9 +156,17 @@ export default async function FullEssayPage({
   const originalFullEssayText = originalParagraphs.join("\n\n");
   const hasPolishedEssay = polishedFullEssayText.length > 0;
   const hasOriginalEssay = originalFullEssayText.length > 0;
+  const referencesText = essay.references;
+  const hasReferences = referencesText.trim().length > 0;
 
-  const copyText =
-    selectedView === "original" ? originalFullEssayText : polishedFullEssayText;
+  const polishedCopyTextWithReferences =
+    hasReferences && hasPolishedEssay
+      ? `${polishedFullEssayText}\n\nReferences\n${referencesText}`
+      : polishedFullEssayText;
+
+  const copyText = selectedView === "original"
+    ? originalFullEssayText
+    : polishedCopyTextWithReferences;
   const copyLabel =
     selectedView === "original" ? "Copy Original Essay" : "Copy Full Essay";
 
@@ -249,7 +257,9 @@ export default async function FullEssayPage({
         {selectedView === "compare" && hasPolishedEssay && (
           <div className="mt-6 space-y-4">
             {essay.paragraphs.map((paragraph) => {
-              const polished = parsePolishResult(paragraph.polishedText).polishedParagraph;
+              const parsed = parsePolishResult(paragraph.polishedText);
+              const polished = parsed.polishedParagraph;
+              const explanation = parsed.explanation.trim();
               const original = paragraph.originalText.trim();
               const { originalPieces, polishedPieces } = buildDiffPieces(
                 original,
@@ -274,6 +284,11 @@ export default async function FullEssayPage({
                           originalPieces.map((piece, index) => (
                             <span
                               key={`o-${paragraph.id}-${index}`}
+                              title={
+                                piece.status === "removed" && explanation
+                                  ? explanation
+                                  : undefined
+                              }
                               className={
                                 piece.status === "removed"
                                   ? "rounded bg-red-100 text-red-800 line-through"
@@ -297,6 +312,11 @@ export default async function FullEssayPage({
                           polishedPieces.map((piece, index) => (
                             <span
                               key={`p-${paragraph.id}-${index}`}
+                              title={
+                                piece.status === "added" && explanation
+                                  ? explanation
+                                  : undefined
+                              }
                               className={
                                 piece.status === "added"
                                   ? "rounded bg-green-100 text-green-800"
@@ -328,6 +348,17 @@ export default async function FullEssayPage({
               to view the full essay.
             </p>
           </div>
+        )}
+
+        {hasReferences && (
+          <section className="mt-6 rounded-lg border border-accent bg-surface p-5">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-secondary">
+              References
+            </h2>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-zinc-800">
+              {referencesText}
+            </p>
+          </section>
         )}
       </section>
     </main>
